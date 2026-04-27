@@ -1,0 +1,73 @@
+# ===== Secrets / env =====
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+.coverage
+htmlcov/
+.tox/
+
+# ===== Node / Next.js =====
+node_modules/
+.next/
+out/
+.npm/
+*.tsbuildinfo
+next-env.d.ts
+
+# ===== Editors / OS =====
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Logs =====
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Local data / backups =====
+*.sqlite
+*.sqlite3
+*.db
+backups/
+data/
+local/
+
+# ===== Docker / runtime =====
+.docker/
+postgres-data/
+
+# ===== Letsencrypt artifacts (live volumes are managed by docker, but never commit anything that lands on disk) =====
+nginx/letsencrypt/
+nginx/certbot-www/*.html
+!nginx/certbot-www/.gitkeep
+
+# ===== Misc =====
+*.pem
+*.key
+*.crt
+!nginx/conf.d/*.conf
+.cache/
+tmp/
