@@ -1,0 +1,149 @@
+name: corridorpay-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cp_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - cp_pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    # No ports exposed — only reachable inside the compose network.
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: corridorpay/api:latest
+    container_name: cp_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV}
+      APP_NAME: ${APP_NAME}
+      LOG_LEVEL: ${LOG_LEVEL}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      ACCESS_TOKEN_TTL_MIN: ${ACCESS_TOKEN_TTL_MIN}
+      REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS}
+      OTP_TTL_SEC: ${OTP_TTL_SEC}
+      FX_LOCK_TTL_SEC: ${FX_LOCK_TTL_SEC}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    networks: [internal]
+
+  # One-shot job: applies Alembic migrations, then exits.
+  # Run manually:  docker compose -f docker-compose.prod.yml --profile init run --rm migrate
+  migrate:
+    image: corridorpay/api:latest
+    container_name: cp_migrate
+    profiles: ["init"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    entrypoint: ["alembic"]
+    command: ["upgrade", "head"]
+    networks: [internal]
+
+  # One-shot job: loads seed data (12 corridors, FX, demo admin).
+  # Run manually:  docker compose -f docker-compose.prod.yml --profile init run --rm seed
+  seed:
+    image: corridorpay/api:latest
+    container_name: cp_seed
+    profiles: ["init"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    entrypoint: ["python"]
+    command: ["-m", "scripts.seed"]
+    networks: [internal]
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    image: corridorpay/web:latest
+    container_name: cp_web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      BACKEND_URL: ${BACKEND_URL}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    networks: [internal]
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    image: corridorpay/nginx:latest
+    container_name: cp_nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+    environment:
+      PRIMARY_DOMAIN: ${PRIMARY_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - cp_letsencrypt:/etc/letsencrypt:ro
+      - cp_certbot_www:/var/www/certbot:ro
+    networks: [internal]
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: cp_certbot
+    # certbot runs on-demand only — `up` will start it but it'll exit; the
+    # renewal loop is handled by the `certbot-renew` service below.
+    profiles: ["init"]
+    volumes:
+      - cp_letsencrypt:/etc/letsencrypt
+      - cp_certbot_www:/var/www/certbot
+    entrypoint: ["certbot"]
+
+  # Long-running renewer: tries renewal every 12h. After a successful renewal
+  # nginx must be reloaded to pick up the new cert — handled by `cron-host`
+  # (restart nginx weekly) or run `docker compose exec nginx nginx -s reload`.
+  certbot-renew:
+    image: certbot/certbot:latest
+    container_name: cp_certbot_renew
+    restart: unless-stopped
+    volumes:
+      - cp_letsencrypt:/etc/letsencrypt
+      - cp_certbot_www:/var/www/certbot
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+
+volumes:
+  cp_pgdata:
+  cp_letsencrypt:
+  cp_certbot_www:
+
+networks:
+  internal:
+    driver: bridge

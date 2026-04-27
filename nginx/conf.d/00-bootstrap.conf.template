@@ -1,0 +1,25 @@
+# Bootstrap config: HTTP only, used to obtain Let's Encrypt cert via webroot.
+# After cert is obtained, switch to 10-app.conf (rename .template files).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${PRIMARY_DOMAIN} ${API_DOMAIN} ${ADMIN_DOMAIN};
+
+    # ACME http-01 challenge (always serve over plain HTTP)
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Health check
+    location = /nginx-health {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    # Until TLS is set up, serve a holding page
+    location / {
+        return 200 "CorridorPay bootstrap. Run scripts/init-letsencrypt.sh to obtain TLS, then switch nginx config.\n";
+        add_header Content-Type text/plain;
+    }
+}

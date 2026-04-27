@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: cp_postgres
+    environment:
+      POSTGRES_USER: corridorpay
+      POSTGRES_PASSWORD: corridorpay
+      POSTGRES_DB: corridorpay
+    ports:
+      - "5434:5432"
+    volumes:
+      - cp_pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corridorpay -d corridorpay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: cp_redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  cp_pgdata:

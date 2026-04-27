@@ -1,0 +1,107 @@
+# Production vhost: TLS + reverse proxy to web (3030) and api (8000).
+# Variables (substituted by docker entrypoint):
+#   ${PRIMARY_DOMAIN} — public site + cabinet (e.g. corridorpay.ru)
+#   ${API_DOMAIN}     — backend API (e.g. api.corridorpay.ru)
+#   ${ADMIN_DOMAIN}   — admin panel (e.g. admin.corridorpay.ru)
+
+# ---------- HTTP -> HTTPS redirect (all 3 domains) ----------
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${PRIMARY_DOMAIN} ${API_DOMAIN} ${ADMIN_DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ---------- Public + Cabinet (Next.js) ----------
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${PRIMARY_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${PRIMARY_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PRIMARY_DOMAIN}/privkey.pem;
+    include /etc/nginx/conf.d/ssl-common.conf;
+    include /etc/nginx/conf.d/security-headers.conf;
+
+    # Rate-limit auth endpoints harder (they sit on the same domain)
+    location ~ ^/(ru|en)/auth/ {
+        limit_req zone=auth burst=10 nodelay;
+        proxy_pass http://web:3030;
+        include /etc/nginx/conf.d/proxy-common.conf;
+    }
+
+    location / {
+        proxy_pass http://web:3030;
+        include /etc/nginx/conf.d/proxy-common.conf;
+    }
+}
+
+# ---------- Admin (separate hostname; same Next.js app, /admin path) ----------
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${ADMIN_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${PRIMARY_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PRIMARY_DOMAIN}/privkey.pem;
+    include /etc/nginx/conf.d/ssl-common.conf;
+    include /etc/nginx/conf.d/security-headers.conf;
+
+    limit_req zone=admin burst=20 nodelay;
+
+    # Optional IP allow-list for staff; uncomment and adjust:
+    # allow 1.2.3.4;
+    # deny all;
+
+    # Always rewrite root to /admin/login on the Next.js side
+    location = / {
+        return 302 /admin/login;
+    }
+
+    location / {
+        # Rewrite admin.* → /admin/* on the upstream
+        rewrite ^/(.*)$ /admin/$1 break;
+        proxy_pass http://web:3030;
+        include /etc/nginx/conf.d/proxy-common.conf;
+    }
+}
+
+# ---------- API (FastAPI) ----------
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${API_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${PRIMARY_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PRIMARY_DOMAIN}/privkey.pem;
+    include /etc/nginx/conf.d/ssl-common.conf;
+    include /etc/nginx/conf.d/security-headers.conf;
+
+    # Per-bucket rate limits
+    location ~ ^/v1/auth/ {
+        limit_req zone=auth burst=10 nodelay;
+        proxy_pass http://api:8000;
+        include /etc/nginx/conf.d/proxy-common.conf;
+    }
+
+    location ~ ^/admin/ {
+        limit_req zone=admin burst=20 nodelay;
+        proxy_pass http://api:8000;
+        include /etc/nginx/conf.d/proxy-common.conf;
+    }
+
+    location / {
+        limit_req zone=api burst=40 nodelay;
+        proxy_pass http://api:8000;
+        include /etc/nginx/conf.d/proxy-common.conf;
+    }
+}
