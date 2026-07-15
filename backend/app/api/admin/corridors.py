@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import errors
-from app.core.deps import get_admin_user, require_admin_reason
+from app.core.deps import get_admin_user, require_admin_reason, require_roles
 from app.db.session import get_db
 from app.models.corridor import Corridor
 from app.models.user import User
@@ -55,7 +55,7 @@ async def patch_corridor(
     corridor_id: uuid.UUID,
     payload: CorridorPatch,
     request: Request,
-    actor: User = Depends(get_admin_user),
+    actor: User = Depends(require_roles("admin")),
     reason: str = Depends(require_admin_reason),
     db: AsyncSession = Depends(get_db),
 ) -> dict:

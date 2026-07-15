@@ -1,7 +1,7 @@
 .PHONY: dev backend frontend test seed migrate db-up db-down
 
 db-up:
-	docker compose up -d postgres redis
+	docker compose up -d --wait postgres redis
 
 db-down:
 	docker compose down

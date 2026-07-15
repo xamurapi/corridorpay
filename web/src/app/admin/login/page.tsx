@@ -8,8 +8,8 @@ type TokenResp = { access_token: string; refresh_token: string };
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('admin@corridorpay.ru');
-  const [password, setPassword] = useState('admin12345');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -41,9 +41,6 @@ export default function AdminLoginPage() {
             {loading ? '…' : 'Войти'}
           </button>
         </form>
-        <p className="alt">
-          В seed: <span className="mono">admin@corridorpay.ru / admin12345</span>
-        </p>
       </div>
     </div>
   );

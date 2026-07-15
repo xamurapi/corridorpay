@@ -14,7 +14,6 @@ function Inner({ locale }: { locale: string }) {
     <section className="section-pad" style={{ paddingTop: 140 }}>
       <h1 className="section-title">{t('corridors_title')}</h1>
       <p className="section-sub">{t('corridors_sub')}</p>
-      {/* @ts-expect-error Async server component */}
       <CorridorsGrid locale={locale} />
     </section>
   );

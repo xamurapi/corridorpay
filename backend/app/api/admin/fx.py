@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_admin_user, require_admin_reason
+from app.core.deps import get_admin_user, require_admin_reason, require_roles
 from app.db.session import get_db
 from app.models.fx import FxRate
 from app.models.user import User
@@ -40,7 +40,7 @@ class RateOverrideIn(BaseModel):
 async def upsert_rate(
     payload: RateOverrideIn,
     request: Request,
-    actor: User = Depends(get_admin_user),
+    actor: User = Depends(require_roles("finance", "admin")),
     reason: str = Depends(require_admin_reason),
     db: AsyncSession = Depends(get_db),
 ) -> dict:

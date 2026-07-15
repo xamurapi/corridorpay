@@ -42,11 +42,12 @@ nav.public-nav {
   position: fixed; top: 36px; left: 0; right: 0; z-index: 100;
   background: rgba(10,10,15,0.85); backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--c-border); padding: 0 5%; height: 60px;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; gap: 24px;
 }
-.public-nav .brand { font-size: 18px; font-weight: 800; letter-spacing: -0.4px; }
+.public-nav .brand { flex: 1 1 0; font-size: 18px; font-weight: 800; letter-spacing: -0.4px; white-space: nowrap; }
 .public-nav .brand span { color: var(--c-accent2); }
-.public-nav .links { display: flex; gap: 24px; align-items: center; }
+.public-nav .links { flex: 0 0 auto; display: flex; gap: 24px; align-items: center; justify-content: center; }
+.public-nav .nav-right { flex: 1 1 0; display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
 .public-nav .links a { color: var(--c-muted); font-size: 15px; transition: color .2s; }
 .public-nav .links a:hover { color: var(--c-text); }
 .nav-cta { background: var(--c-accent); color: #fff; padding: 9px 22px; border-radius: 8px; font-weight: 600; font-size: 15px; transition: all .2s; }
@@ -251,7 +252,11 @@ table.data .mono { font-family: 'JetBrains Mono','Consolas',monospace; font-size
   .app-main { margin-left: 0; padding: 24px 18px 60px; }
   .sidebar { display: none; }
 }
+/* Collapse the centre nav links before brand + auth buttons would overflow and
+   clip the CTA (body has overflow-x:hidden). Keeps brand + login/register. */
+@media (max-width: 860px) {
+  .public-nav .links { display: none; }
+}
 @media (max-width: 640px) {
   body { font-size: 14px; }
-  .public-nav .links { display: none; }
 }

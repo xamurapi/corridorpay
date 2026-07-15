@@ -39,4 +39,5 @@ async def get_limits(current: User = Depends(get_current_user)) -> dict:
         2: {"daily_usd": 3000, "monthly_usd": 15000, "label": "Tier 2 — Паспорт + селфи"},
         3: {"daily_usd": 50000, "monthly_usd": 250000, "label": "Tier 3 — Бизнес"},
     }
-    return {"tier": current.kyc_tier, **tiers[current.kyc_tier]}
+    tier_info = tiers.get(current.kyc_tier, tiers[0])
+    return {"tier": current.kyc_tier, **tier_info}

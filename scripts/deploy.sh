@@ -20,10 +20,17 @@ $COMPOSE build
 echo "[deploy] 2/4  Starting database…"
 $COMPOSE up -d postgres
 
-echo "[deploy] 3/4  Applying migrations + seed…"
+echo "[deploy] 3/4  Applying migrations…"
 $COMPOSE --profile init run --rm migrate
-# Seed is optional in prod — comment out if you don't want demo users.
-$COMPOSE --profile init run --rm seed
+# Demo seed creates a well-known superadmin (admin@corridorpay.ru / admin12345).
+# NEVER seed automatically in production. Opt in explicitly for staging demos:
+#   SEED_DEMO=1 scripts/deploy.sh
+if [ "${SEED_DEMO:-0}" = "1" ]; then
+    echo "[deploy]      SEED_DEMO=1 — seeding demo users (change their passwords immediately!)"
+    $COMPOSE --profile init run --rm seed
+else
+    echo "[deploy]      Skipping demo seed (set SEED_DEMO=1 to enable)."
+fi
 
 echo "[deploy] 4/4  Starting api + web + nginx + cert renewer…"
 $COMPOSE up -d api web nginx certbot-renew

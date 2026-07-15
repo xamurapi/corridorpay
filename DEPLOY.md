@@ -94,7 +94,7 @@ LETSENCRYPT_STAGING=0 bash scripts/init-letsencrypt.sh
 ```bash
 curl -fsS https://${PRIMARY_DOMAIN}/ru               # лендинг
 curl -fsS https://${API_DOMAIN}/health               # API
-curl -fsS https://${ADMIN_DOMAIN}/login              # админка
+curl -fsS https://${ADMIN_DOMAIN}/admin/login        # админка
 docker compose -f docker-compose.prod.yml ps         # все сервисы Up
 docker compose -f docker-compose.prod.yml logs -f    # логи
 ```

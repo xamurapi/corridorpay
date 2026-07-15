@@ -23,6 +23,26 @@ export function setTokens(opts: { access?: string; refresh?: string; admin?: boo
   }
 }
 
+// Revoke the refresh session server-side (best-effort), then clear local tokens.
+export async function revokeSession(kind: 'user' | 'admin' = 'user') {
+  // Only the user flow stores a refresh token (cp_refresh). Never send it when
+  // logging out of the admin panel — that would revoke the separate user session.
+  const rt = kind === 'user' ? readToken('refresh') : null;
+  if (rt) {
+    try {
+      await fetch(`${API_BASE}/v1/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ refresh_token: rt }),
+        cache: 'no-store',
+      });
+    } catch {
+      // ignore network failure — local tokens are cleared regardless
+    }
+  }
+  clearTokens(kind);
+}
+
 export function clearTokens(kind: 'user' | 'admin' = 'user') {
   if (typeof window === 'undefined') return;
   if (kind === 'admin') {
@@ -33,11 +53,45 @@ export function clearTokens(kind: 'user' | 'admin' = 'user') {
   }
 }
 
+let refreshInFlight: Promise<boolean> | null = null;
+
+// Exchange the stored refresh token for a fresh access/refresh pair.
+// Deduplicated so concurrent 401s trigger only one refresh call.
+async function tryRefresh(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (refreshInFlight) return refreshInFlight;
+  const rt = readToken('refresh');
+  if (!rt) return false;
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ refresh_token: rt }),
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        clearTokens('user');
+        return false;
+      }
+      const data = (await res.json()) as { access_token?: string; refresh_token?: string };
+      if (!data.access_token) return false;
+      setTokens({ access: data.access_token, refresh: data.refresh_token });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
-  options: RequestInit & { auth?: 'user' | 'admin' | 'none'; adminReason?: string } = {},
+  options: RequestInit & { auth?: 'user' | 'admin' | 'none'; adminReason?: string; _retried?: boolean } = {},
 ): Promise<T> {
-  const { auth = 'none', adminReason, headers, ...rest } = options;
+  const { auth = 'none', adminReason, headers, _retried, ...rest } = options;
   const h = new Headers(headers || {});
   h.set('Content-Type', 'application/json');
   h.set('Accept', 'application/json');
@@ -47,14 +101,35 @@ export async function apiFetch<T = unknown>(
   } else if (auth === 'admin') {
     const t = readToken('admin');
     if (t) h.set('Authorization', `Bearer ${t}`);
-    if (adminReason) h.set('X-Admin-Reason', adminReason);
+    // HTTP header values must be ISO-8859-1; URL-encode so Cyrillic reasons
+    // survive. The backend URL-decodes this for audit logs.
+    if (adminReason) h.set('X-Admin-Reason', encodeURIComponent(adminReason));
   }
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   const res = await fetch(url, { ...rest, headers: h, cache: 'no-store' });
+
+  // Transparently refresh an expired user session once, then retry.
+  if (res.status === 401 && auth === 'user' && !_retried) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      return apiFetch<T>(path, { ...options, _retried: true });
+    }
+  }
+
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Non-JSON body (e.g. nginx HTML 502/504) — surface as a structured error.
+      data = null;
+    }
+  }
   if (!res.ok) {
-    const err = (data && (data.detail?.error || data.error)) || { code: 'http_error', message: res.statusText };
+    const d = data as { detail?: { error?: ApiError }; error?: ApiError } | null;
+    const err: ApiError =
+      (d && (d.detail?.error || d.error)) || { code: 'http_error', message: res.statusText || `HTTP ${res.status}` };
     const e = new Error(err.message) as Error & { api?: ApiError };
     e.api = err;
     throw e;

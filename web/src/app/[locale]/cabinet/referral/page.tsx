@@ -3,13 +3,18 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 
-type Me = { id: string; email: string; full_name: string | null };
+type Me = { id: string; email: string; full_name: string | null; referral_code: string | null };
 
 export default function ReferralPage() {
   const [me, setMe] = useState<Me | null>(null);
-  useEffect(() => { api.get<Me>('/v1/me', { auth: 'user' }).then(setMe).catch(() => {}); }, []);
-  const code = me?.id?.slice(0, 8).toUpperCase() || 'XXXXXXXX';
-  const link = typeof window !== 'undefined' ? `${window.location.origin}/auth/signup?ref=${code}` : '';
+  const [origin, setOrigin] = useState('');
+  useEffect(() => {
+    setOrigin(window.location.origin);
+    api.get<Me>('/v1/me', { auth: 'user' }).then(setMe).catch(() => {});
+  }, []);
+  // Use the real referral_code issued by the backend (not a slice of the UUID).
+  const code = me?.referral_code || '—';
+  const link = me?.referral_code && origin ? `${origin}/auth/signup?ref=${code}` : '';
 
   return (
     <>

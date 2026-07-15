@@ -32,6 +32,13 @@ from app.services.otp import consume_otp, issue_otp
 
 router = APIRouter()
 
+# ISO country -> local settlement currency (for auto-provisioned wallets).
+COUNTRY_CURRENCY = {
+    "RU": "RUB", "IN": "INR", "CN": "CNY", "TR": "TRY", "BY": "BYN",
+    "UZ": "UZS", "KZ": "KZT", "KG": "KGS", "AM": "AMD", "AZ": "AZN", "GE": "GEL",
+    "DE": "EUR", "FR": "EUR", "ES": "EUR", "IT": "EUR", "NL": "EUR",
+}
+
 
 def _is_dev() -> bool:
     return settings.APP_ENV in ("local", "dev", "test")
@@ -72,7 +79,9 @@ async def signup(payload: SignupIn, request: Request, db: AsyncSession = Depends
         db.add(user)
         await db.flush()
         # auto-create wallets in user's country currency + USD
-        for ccy in {"USD"}:
+        local_ccy = COUNTRY_CURRENCY.get(user.country_iso2 or "")
+        currencies = {"USD"} | ({local_ccy} if local_ccy else set())
+        for ccy in currencies:
             db.add(Wallet(id=uuid.uuid4(), user_id=user.id, currency=ccy))
     elif user.email_verified:
         # already verified -> still OK to re-issue login OTP
@@ -104,7 +113,7 @@ async def verify_otp(payload: VerifyOtpIn, request: Request, db: AsyncSession = 
     return pair
 
 
-@router.post("/login", response_model=OtpSentOut | TokenPair)
+@router.post("/login", response_model=TokenPair | OtpSentOut)
 async def login(payload: LoginIn, request: Request, db: AsyncSession = Depends(get_db)):
     email = payload.email.lower()
     res = await db.execute(select(User).where(User.email == email))

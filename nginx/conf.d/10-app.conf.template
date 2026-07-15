@@ -55,20 +55,28 @@ server {
     include /etc/nginx/conf.d/ssl-common.conf;
     include /etc/nginx/conf.d/security-headers.conf;
 
-    limit_req zone=admin burst=20 nodelay;
-
     # Optional IP allow-list for staff; uncomment and adjust:
     # allow 1.2.3.4;
     # deny all;
 
-    # Always rewrite root to /admin/login on the Next.js side
+    # The Next.js app already serves the admin panel under the /admin/* path and
+    # emits its assets at /_next/*. Proxy straight through WITHOUT rewriting —
+    # rewriting to /admin/* double-prefixed pages (/admin/admin/login) and broke
+    # every /_next asset. Just send the bare root to the login page.
     location = / {
         return 302 /admin/login;
     }
 
+    # Static assets: a single page load fires 25–40 parallel chunk requests over
+    # HTTP/2 — do NOT rate-limit these or the panel 503s mid-load.
+    location /_next/ {
+        proxy_pass http://web:3030;
+        include /etc/nginx/conf.d/proxy-common.conf;
+    }
+
     location / {
-        # Rewrite admin.* → /admin/* on the upstream
-        rewrite ^/(.*)$ /admin/$1 break;
+        # Rate-limit only app/HTML navigations, not asset fan-out.
+        limit_req zone=admin burst=20 nodelay;
         proxy_pass http://web:3030;
         include /etc/nginx/conf.d/proxy-common.conf;
     }

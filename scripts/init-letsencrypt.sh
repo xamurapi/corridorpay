@@ -16,9 +16,18 @@ if [ ! -f .env.production ]; then
     exit 1
 fi
 
-# Load env (only the names we need)
+COMPOSE="docker compose --env-file .env.production -f docker-compose.prod.yml"
+
+# Load only the domain/email names we need. Deliberately do NOT re-export
+# LETSENCRYPT_STAGING here so a value passed on the command line
+# (LETSENCRYPT_STAGING=1 scripts/init-letsencrypt.sh) is not clobbered.
 # shellcheck disable=SC2046
-export $(grep -E '^(PRIMARY_DOMAIN|API_DOMAIN|ADMIN_DOMAIN|LETSENCRYPT_EMAIL|LETSENCRYPT_STAGING)=' .env.production | xargs)
+export $(grep -E '^(PRIMARY_DOMAIN|API_DOMAIN|ADMIN_DOMAIN|LETSENCRYPT_EMAIL)=' .env.production | xargs)
+
+# Fall back to the file's staging value only if it was not already set in the env.
+if [ -z "${LETSENCRYPT_STAGING:-}" ]; then
+    LETSENCRYPT_STAGING="$(grep -E '^LETSENCRYPT_STAGING=' .env.production | tail -1 | cut -d= -f2)"
+fi
 
 : "${PRIMARY_DOMAIN:?missing in .env.production}"
 : "${API_DOMAIN:?missing in .env.production}"
@@ -36,10 +45,10 @@ echo "[init-le] Email:   $LETSENCRYPT_EMAIL"
 echo
 
 # 1. Ensure nginx is running with the bootstrap config (port 80, ACME challenge path).
-docker compose -f docker-compose.prod.yml up -d nginx
+$COMPOSE up -d nginx
 
 # 2. Run certbot one-shot inside its container, sharing the certbot-www volume.
-docker compose -f docker-compose.prod.yml run --rm certbot \
+$COMPOSE run --rm certbot \
     certonly --webroot -w /var/www/certbot \
     --email "$LETSENCRYPT_EMAIL" \
     --agree-tos --no-eff-email --keep-until-expiring \
@@ -49,7 +58,7 @@ docker compose -f docker-compose.prod.yml run --rm certbot \
     -d "$ADMIN_DOMAIN"
 
 # 3. Reload nginx — the entrypoint will see the cert and switch to 10-app.conf.
-docker compose -f docker-compose.prod.yml restart nginx
+$COMPOSE restart nginx
 
 echo
 echo "[init-le] Done. Visit https://$PRIMARY_DOMAIN to verify."

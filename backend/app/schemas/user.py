@@ -16,6 +16,7 @@ class UserOut(BaseModel):
     kyc_tier: int
     email_verified: bool
     phone_verified: bool
+    referral_code: str | None = None
     created_at: datetime
 
 

@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
 FROM node:20-alpine AS base
-ENV NODE_ENV=production
+# NOTE: NODE_ENV is intentionally NOT set to production here — it would make
+# `npm ci` skip devDependencies (typescript, @types/*) needed by the build.
+# It is set only in the runtime stage below.
 
 # --- deps: install with cached node_modules ---
 FROM base AS deps
@@ -22,7 +24,8 @@ RUN npm run build
 
 # --- runtime: tiny image, non-root user ---
 FROM base AS runtime
-ENV NEXT_TELEMETRY_DISABLED=1 \
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
     PORT=3030 \
     HOSTNAME=0.0.0.0
 WORKDIR /app

@@ -42,7 +42,7 @@ export function CabinetSidebar() {
         <div key={sec.titleKey}>
           <h4>{t(sec.titleKey)}</h4>
           {sec.items.map((it) => {
-            const active = pathname === it.href || (it.href !== '/cabinet' && pathname?.startsWith(it.href));
+            const active = pathname === it.href || pathname?.startsWith(it.href + '/');
             return (
               <Link key={it.href} href={it.href} className={active ? 'active' : ''}>
                 <span className="ico">{it.icon}</span>

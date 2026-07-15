@@ -6,12 +6,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import errors
-from app.core.deps import get_admin_user, require_admin_reason
+from app.core.deps import get_admin_user, require_admin_reason, require_roles
 from app.db.session import get_db
 from app.models.user import User
 from app.services.audit import log_audit
 
 router = APIRouter(prefix="/users", tags=["admin"])
+
+VALID_STATUSES = {"active", "suspended", "closed"}
+VALID_ROLES = {"user", "superadmin", "admin", "compliance", "support", "finance", "developer", "viewer"}
 
 
 class UserAdminOut(BaseModel):
@@ -77,7 +80,7 @@ async def patch_user(
     user_id: uuid.UUID,
     payload: UserPatch,
     request: Request,
-    actor: User = Depends(get_admin_user),
+    actor: User = Depends(require_roles("admin", "compliance")),
     reason: str = Depends(require_admin_reason),
     db: AsyncSession = Depends(get_db),
 ) -> UserAdminOut:
@@ -85,6 +88,16 @@ async def patch_user(
     u = res.scalar_one_or_none()
     if not u:
         raise errors.not_found("user.not_found", "User not found")
+    # Validate incoming values before mutating enum-like columns.
+    if payload.status is not None and payload.status not in VALID_STATUSES:
+        raise errors.bad_request("user.invalid_status", f"status must be one of {sorted(VALID_STATUSES)}")
+    if payload.role is not None and payload.role not in VALID_ROLES:
+        raise errors.bad_request("user.invalid_role", f"role must be one of {sorted(VALID_ROLES)}")
+    if payload.kyc_tier is not None and not (0 <= payload.kyc_tier <= 3):
+        raise errors.bad_request("user.invalid_kyc_tier", "kyc_tier must be between 0 and 3")
+    # Only superadmin may grant/revoke roles — prevents privilege escalation.
+    if payload.role is not None and payload.role != u.role and actor.role != "superadmin":
+        raise errors.forbidden("user.role_change_forbidden", "Only superadmin may change roles")
     diff = {}
     if payload.status is not None and payload.status != u.status:
         diff["status"] = [u.status, payload.status]

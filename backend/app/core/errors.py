@@ -33,3 +33,7 @@ def bad_request(code: str = "common.bad_request", message: str = "Bad request", 
 
 def conflict(code: str = "common.conflict", message: str = "Conflict") -> AppError:
     return AppError(code, message, http_status=status.HTTP_409_CONFLICT)
+
+
+def too_many_requests(code: str = "common.rate_limited", message: str = "Too many requests") -> AppError:
+    return AppError(code, message, http_status=status.HTTP_429_TOO_MANY_REQUESTS)

@@ -67,7 +67,6 @@ function Inner({ locale }: { locale: string }) {
       <section className="section-pad" style={{ background: 'var(--c-bg2)' }}>
         <h2 className="section-title">{t('corridors_title')}</h2>
         <p className="section-sub">{t('corridors_sub')}</p>
-        {/* @ts-expect-error Async server component */}
         <CorridorsGrid locale={locale} />
       </section>
 

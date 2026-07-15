@@ -13,6 +13,8 @@ export function PublicNav() {
         <Link href="/corridors">{t('corridors')}</Link>
         <Link href="/pricing">{t('pricing')}</Link>
         <Link href="/contacts">{t('contacts')}</Link>
+      </div>
+      <div className="nav-right">
         <Link href="/auth/login" className="nav-login">
           {t('login')}
         </Link>

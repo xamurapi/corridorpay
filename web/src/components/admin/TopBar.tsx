@@ -3,20 +3,33 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, clearTokens } from '@/lib/api';
+import { api, clearTokens, revokeSession } from '@/lib/api';
 
 type Me = { id: string; email: string; full_name: string | null; role: string };
+
+const STAFF_ROLES = ['superadmin', 'admin', 'compliance', 'support', 'finance', 'developer', 'viewer'];
 
 export function AdminTopBar() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
 
   useEffect(() => {
-    api.get<Me>('/v1/me', { auth: 'admin' }).then(setMe).catch(() => router.replace('/admin/login'));
+    api
+      .get<Me>('/v1/me', { auth: 'admin' })
+      .then((u) => {
+        // A valid non-staff token must not unlock the admin shell.
+        if (!STAFF_ROLES.includes(u.role)) {
+          clearTokens('admin');
+          router.replace('/admin/login');
+          return;
+        }
+        setMe(u);
+      })
+      .catch(() => router.replace('/admin/login'));
   }, [router]);
 
-  function logout() {
-    clearTokens('admin');
+  async function logout() {
+    await revokeSession('admin');
     router.replace('/admin/login');
   }
 

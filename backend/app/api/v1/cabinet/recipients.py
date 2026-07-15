@@ -14,6 +14,21 @@ from app.models.user import User
 router = APIRouter(prefix="/recipients", tags=["cabinet"])
 
 
+def _mask_identifier(identifier: str) -> str:
+    """Reveal only the last 4 chars; mask the rest (PAN/IBAN/phone)."""
+    if not identifier:
+        return identifier
+    if len(identifier) <= 4:
+        return "*" * len(identifier)
+    return identifier[-4:].rjust(len(identifier), "*")
+
+
+def _recipient_out(r: Recipient) -> "RecipientOut":
+    out = RecipientOut.model_validate(r)
+    out.identifier = _mask_identifier(r.identifier)
+    return out
+
+
 class RecipientIn(BaseModel):
     full_name: str = Field(min_length=2, max_length=200)
     country_iso2: str = Field(min_length=2, max_length=2)
@@ -42,7 +57,7 @@ async def list_recipients(current: User = Depends(get_current_user), db: AsyncSe
     res = await db.execute(
         select(Recipient).where(Recipient.user_id == current.id).order_by(Recipient.favorite.desc(), Recipient.full_name)
     )
-    return [RecipientOut.model_validate(r) for r in res.scalars().all()]
+    return [_recipient_out(r) for r in res.scalars().all()]
 
 
 @router.post("", response_model=RecipientOut, status_code=201)
@@ -61,7 +76,7 @@ async def create_recipient(payload: RecipientIn, current: User = Depends(get_cur
     db.add(r)
     await db.commit()
     await db.refresh(r)
-    return RecipientOut.model_validate(r)
+    return _recipient_out(r)
 
 
 @router.delete("/{recipient_id}")

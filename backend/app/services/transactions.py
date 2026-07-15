@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import errors
+from app.core.masking import mask_identifier
 from app.models.fx import FxLock
 from app.models.recipient import Recipient
 from app.models.transaction import Transaction, TxStatusHistory
@@ -27,6 +28,34 @@ VALID_TRANSITIONS = {
     "held_for_review": {"rate_locked", "rejected", "cancelled"},
 }
 FINAL = {"completed", "rejected", "failed", "cancelled", "refunded", "expired"}
+
+
+def build_transfer_entries(
+    *,
+    user_id: uuid.UUID,
+    tx_id: uuid.UUID,
+    from_ccy: str,
+    to_ccy: str,
+    amt_in_minor: int,
+    amt_out_minor: int,
+    fee_minor: int,
+) -> list[dict]:
+    """Double-entry ledger legs for a transfer. Balances per currency:
+    the FX clearing account bridges the two currencies (source-currency debit,
+    destination-currency credit; the value spread is realized FX)."""
+    user_wallet_code = f"user_wallet:{user_id}:{from_ccy}"
+    fee_account = "system:fee_revenue"
+    fx_pnl = "system:fx_pnl"
+    ext_recipient = f"external:recipient:{tx_id}"
+    return [
+        # --- Source currency (from_ccy): nets to 0 ---
+        {"account_code": user_wallet_code, "kind": "user_wallet", "currency": from_ccy, "owner_user_id": user_id, "direction": "credit", "amount_minor": amt_in_minor + fee_minor},
+        {"account_code": f"{fee_account}:{from_ccy}", "kind": "fee_revenue", "currency": from_ccy, "direction": "debit", "amount_minor": fee_minor},
+        {"account_code": f"{fx_pnl}:{from_ccy}", "kind": "fx_pnl", "currency": from_ccy, "direction": "debit", "amount_minor": amt_in_minor},
+        # --- Destination currency (to_ccy): nets to 0 ---
+        {"account_code": f"{fx_pnl}:{to_ccy}", "kind": "fx_pnl", "currency": to_ccy, "direction": "credit", "amount_minor": amt_out_minor},
+        {"account_code": f"{ext_recipient}:{to_ccy}", "kind": "external", "currency": to_ccy, "direction": "debit", "amount_minor": amt_out_minor},
+    ]
 
 
 async def add_status(db: AsyncSession, tx: Transaction, status: str, *, note: str | None = None, actor_type: str = "system") -> None:
@@ -53,8 +82,13 @@ async def create_transfer(
     purpose_code: str | None,
     client_ip: str | None,
 ) -> Transaction:
-    # Idempotency: return existing tx
-    res = await db.execute(select(Transaction).where(Transaction.idempotency_key == idempotency_key))
+    # Idempotency: return existing tx (scoped to this user to avoid cross-user replay/IDOR)
+    res = await db.execute(
+        select(Transaction).where(
+            Transaction.idempotency_key == idempotency_key,
+            Transaction.user_id == user.id,
+        )
+    )
     existing = res.scalar_one_or_none()
     if existing:
         return existing
@@ -110,7 +144,9 @@ async def create_transfer(
         to_country=recipient.country_iso2 if recipient else None,
         from_currency=from_ccy,
         to_currency=to_ccy,
-        amount_in_minor=amt_in_minor + fee_minor,
+        # Principal the user asked to send (matches the quote); fee is tracked
+        # separately in fee_minor and charged on top (see wallet debit below).
+        amount_in_minor=amt_in_minor,
         amount_out_minor=amt_out_minor,
         fee_minor=fee_minor,
         fx_rate_locked=fx_rate,
@@ -121,7 +157,7 @@ async def create_transfer(
                 "full_name": recipient.full_name,
                 "country": recipient.country_iso2,
                 "method": recipient.method,
-                "identifier_masked": recipient.identifier[-4:].rjust(len(recipient.identifier), "*"),
+                "identifier_masked": mask_identifier(recipient.identifier),
             }
             if recipient
             else {}
@@ -140,27 +176,16 @@ async def create_transfer(
     # Simulate sandbox PSP confirmation (in prod: webhook drives this)
     await add_status(db, tx, "psp_confirmed")
 
-    # Post ledger entries (simplified: source wallet -> recipient external + fee revenue)
-    user_wallet_code = f"user_wallet:{user.id}:{from_ccy}"
-    fee_account = "system:fee_revenue"
-    fx_pnl = "system:fx_pnl"
-    ext_recipient = f"external:recipient:{tx.id}"
-    psp_settle = "psp:demo:settlement"
-
-    entries = [
-        # Charge user wallet (source amount + fee)
-        {"account_code": user_wallet_code, "kind": "user_wallet", "currency": from_ccy, "owner_user_id": user.id, "direction": "credit", "amount_minor": amt_in_minor + fee_minor},
-        # Fee revenue
-        {"account_code": f"{fee_account}:{from_ccy}", "kind": "fee_revenue", "currency": from_ccy, "direction": "debit", "amount_minor": fee_minor},
-        # FX pnl pair (source)
-        {"account_code": f"{fx_pnl}:{from_ccy}", "kind": "fx_pnl", "currency": from_ccy, "direction": "debit", "amount_minor": amt_in_minor},
-        # FX pnl pair (dest)
-        {"account_code": f"{fx_pnl}:{to_ccy}", "kind": "fx_pnl", "currency": to_ccy, "direction": "credit", "amount_minor": amt_out_minor},
-        # PSP settlement (dest currency)
-        {"account_code": f"{psp_settle}:{to_ccy}", "kind": "psp_settlement", "currency": to_ccy, "direction": "debit", "amount_minor": amt_out_minor},
-        # External recipient
-        {"account_code": f"{ext_recipient}:{to_ccy}", "kind": "external", "currency": to_ccy, "direction": "credit", "amount_minor": amt_out_minor},
-    ]
+    # Post ledger entries (double-entry, balances per currency — see helper).
+    entries = build_transfer_entries(
+        user_id=user.id,
+        tx_id=tx.id,
+        from_ccy=from_ccy,
+        to_ccy=to_ccy,
+        amt_in_minor=amt_in_minor,
+        amt_out_minor=amt_out_minor,
+        fee_minor=fee_minor,
+    )
     await post_journal(
         db,
         transaction_id=tx.id,

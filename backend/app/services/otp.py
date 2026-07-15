@@ -1,12 +1,16 @@
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import errors
 from app.core.config import settings
 from app.core.security import hash_password, verify_password
 from app.models.user import OTP
+
+# Max OTP codes that may be issued to one target within a TTL window.
+MAX_OTPS_PER_WINDOW = 5
 
 
 def _gen_code() -> str:
@@ -14,6 +18,16 @@ def _gen_code() -> str:
 
 
 async def issue_otp(db: AsyncSession, *, target: str, purpose: str) -> tuple[OTP, str]:
+    target = target.lower().strip()
+    # Rate-limit issuance to blunt brute-force via mass re-requests.
+    window_start = datetime.now(timezone.utc) - timedelta(seconds=settings.OTP_TTL_SEC)
+    recent = await db.execute(
+        select(func.count())
+        .select_from(OTP)
+        .where(OTP.target == target, OTP.purpose == purpose, OTP.created_at >= window_start)
+    )
+    if (recent.scalar_one() or 0) >= MAX_OTPS_PER_WINDOW:
+        raise errors.too_many_requests("auth.otp_rate_limited", "Too many OTP requests, try again later")
     code = _gen_code()
     otp = OTP(
         id=uuid.uuid4(),

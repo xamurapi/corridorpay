@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Link, useRouter } from '@/i18n/routing';
-import { api, clearTokens } from '@/lib/api';
+import { api, revokeSession } from '@/lib/api';
 
 type Me = { id: string; email: string; full_name?: string | null; kyc_tier: number };
 
@@ -18,8 +18,8 @@ export function CabinetTopBar() {
     });
   }, [router]);
 
-  function logout() {
-    clearTokens('user');
+  async function logout() {
+    await revokeSession('user');
     router.replace('/auth/login');
   }
 
